@@ -10,8 +10,13 @@ import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.Range;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 
-@TeleOp
+@TeleOp(name = "ATeleOp [DRIFTFIX-v2 2026-10-08]")
 public class ATeleOp extends LinearOpMode {
+
+    // Bump this string every time you push a new build to the robot.
+    // It shows up on the Driver Station so you can confirm the code that's
+    // actually running is the one you just built (not a stale/cached APK).
+    private static final String BUILD_TAG = "ATeleOp DRIFTFIX-v2 2026-10-08";
 
     // How aggressively the IMU corrects back to the target heading when the
     // driver isn't actively turning. Raise it if the robot still drifts,
@@ -64,14 +69,25 @@ public class ATeleOp extends LinearOpMode {
         //For motors add a new brake mode
         //intake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
+        // Diagnostic banner: if you don't see exactly this on the Driver
+        // Station BEFORE pressing start, the robot is running an old/cached
+        // build and you need to re-deploy, not change the code again.
+        telemetry.addLine(BUILD_TAG);
+        telemetry.addData("Status", "Hardware initialized, IMU ready - press START");
+        telemetry.addData("Gamepad1", gamepad1.getGamepadId() != -1 ? "connected" : "NOT CONNECTED");
+        telemetry.update();
+
         waitForStart();
 
         if (isStopRequested()) return;
 
         imu.resetYaw();
         double targetHeading = 0;
+        long loopCount = 0;
 
         while (opModeIsActive()) {
+            loopCount++;
+
             // Driver can re-zero the heading hold at any time (e.g. after a
             // collision knocks the robot off its intended heading).
             if (gamepad1.back) {
@@ -79,22 +95,28 @@ public class ATeleOp extends LinearOpMode {
                 targetHeading = 0;
             }
 
-            double y = -gamepad1.left_stick_y; // Remember, Y stick value is reversed
-            double x = gamepad1.left_stick_x * 1.1; // Counteract imperfect strafing
-            double rx = gamepad1.right_stick_x;
+            double rawY = -gamepad1.left_stick_y; // Remember, Y stick value is reversed
+            double rawX = gamepad1.left_stick_x;
+            double rawRx = gamepad1.right_stick_x;
+
+            double y = rawY;
+            double x = rawX * 1.1; // Counteract imperfect strafing
+            double rx = rawRx;
 
             double currentHeading = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES);
+            double headingError = targetHeading - currentHeading;
+            if (headingError > 180) headingError -= 360;
+            else if (headingError < -180) headingError += 360;
 
-            if (Math.abs(rx) > TURN_DEADZONE) {
+            boolean correctionActive = Math.abs(rawRx) <= TURN_DEADZONE;
+
+            if (!correctionActive) {
                 // Driver is actively turning: just follow the stick, and keep
                 // the heading target glued to wherever the turn leaves us.
                 targetHeading = currentHeading;
             } else {
                 // Driver wants to go straight (or stand still): steer back
                 // towards the locked heading instead of letting it drift.
-                double headingError = targetHeading - currentHeading;
-                if (headingError > 180) headingError -= 360;
-                else if (headingError < -180) headingError += 360;
                 rx = Range.clip(headingError * HEADING_CORRECTION_GAIN,
                         -HEADING_CORRECTION_MAX, HEADING_CORRECTION_MAX);
             }
@@ -132,7 +154,20 @@ public class ATeleOp extends LinearOpMode {
                 leftArm.setPosition(0.5);
             }
 
-            telemetry.addData("heading", "current %.1f / target %.1f", currentHeading, targetHeading);
+            // --- Diagnostics: everything you need to confirm this exact
+            // build is running, and to tune the drift correction. ---
+            telemetry.addLine(BUILD_TAG);
+            telemetry.addData("Loop #", loopCount);
+            telemetry.addLine();
+            telemetry.addData("Stick raw", "y=%.2f x=%.2f rx=%.2f", rawY, rawX, rawRx);
+            telemetry.addData("Drive cmd", "y=%.2f x=%.2f rx=%.2f", y, x, rx);
+            telemetry.addData("Heading", "current=%.1f target=%.1f error=%.1f",
+                    currentHeading, targetHeading, headingError);
+            telemetry.addData("Drift correction", correctionActive ? "ACTIVE" : "off (driver turning)");
+            telemetry.addLine();
+            telemetry.addData("Motor FL/BL/FR/BR", "%.2f / %.2f / %.2f / %.2f",
+                    frontLeftPower, backLeftPower, frontRightPower, backRightPower);
+            telemetry.addData("Arm position", "%.2f", leftArm.getPosition());
             telemetry.update();
         }
     }
